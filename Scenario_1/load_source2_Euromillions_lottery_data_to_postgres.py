@@ -28,7 +28,7 @@ def main():
 
     # --- File Paths and Table Name ---
     historical_csv_path = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_1/Data/EuroMillions_numbers_20040110-20211201.csv"  
-    euromillions_table = "public.euromillions_draw_history"
+    euromillions_table = "public.euromillions_draw_history_pg"
 
     # Read the CSV with semicolon delimiter, infer schema, and correct the date format
     df = spark.read.csv(historical_csv_path, header=True, inferSchema=True, sep=";")
