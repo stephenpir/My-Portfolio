@@ -1,0 +1,23 @@
+-- Active: 1759151439047@@pg-3eaa1612-stephenpir-9959.c.aivencloud.com@22400@defaultdb
+-- Active: 1759151439047@@pg-3eaa1612-stephenpir-9959.c.aivencloud.com@22400@defaultdb
+-- SQL script to alter the euromillions_draw_history_PG table.
+--
+-- Add new column for load_number information.
+ALTER TABLE public.euromillions_draw_history_PG
+ADD COLUMN load_number INT;
+
+---- Update the existing data with initial load_number
+--update public.euromillions_draw_history_PG
+--set load_number = 1 where load_number is null;
+
+-- Drop the primary key constraint on draw_number because the historical data has no value for it.
+ALTER TABLE public.euromillions_draw_history_PG
+DROP CONSTRAINT IF EXISTS euromillions_draw_history_pkey;
+
+-- Modify existing columns to allow NULLs, as the historical data
+-- from EuroMillions_numbers.csv does not contain these fields.
+ALTER TABLE public.euromillions_draw_history_PG
+ALTER COLUMN uk_millionaire_maker DROP NOT NULL,
+ALTER COLUMN draw_number DROP NOT NULL;
+
+

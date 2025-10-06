@@ -1,0 +1,32 @@
+-- SQL script to create the EUROMILLIONS_DRAW_HISTORY table
+-- This table stores historical draw data for the EuroMillions lottery.
+
+-- DDL for dropping the EUROMILLIONS_DRAW_HISTORY table if it exists 
+BEGIN
+   EXECUTE IMMEDIATE 'DROP TABLE IF EXISTS ' || 'EUROMILLIONS_DRAW_HISTORY'
+   || ' PURGE';
+END;
+-- DROP TABLE EUROMILLIONS_DRAW_HISTORY PURGE;
+
+-- DDL for creating the EUROMILLIONS_DRAW_HISTORY table
+CREATE TABLE EUROMILLIONS_DRAW_HISTORY (
+    draw_number    NUMBER(10) NOT NULL PRIMARY KEY,
+    draw_date      DATE NOT NULL,
+    ball_1         NUMBER(2) NOT NULL,
+    ball_2         NUMBER(2) NOT NULL,
+    ball_3         NUMBER(2) NOT NULL,
+    ball_4         NUMBER(2) NOT NULL,
+    ball_5         NUMBER(2) NOT NULL,
+    lucky_star_1   NUMBER(2) NOT NULL,
+    lucky_star_2   NUMBER(2) NOT NULL,
+    jackpot        VARCHAR2(30),
+    winners        NUMBER(2),
+    CONSTRAINT uq_draw_date UNIQUE (draw_date)
+);
+
+-- Optional: Add comments to the table and columns for better documentation
+COMMENT ON TABLE EUROMILLIONS_DRAW_HISTORY IS 'Stores the historical draw data for the EuroMillions lottery.';
+COMMENT ON COLUMN EUROMILLIONS_DRAW_HISTORY.draw_number IS 'A unique, sequential number for each draw, starting from 1 for the oldest draw.';
+COMMENT ON COLUMN EUROMILLIONS_DRAW_HISTORY.draw_date IS 'The date of the lottery draw.';
+COMMENT ON COLUMN EUROMILLIONS_DRAW_HISTORY.jackpot IS 'The estimated or actual jackpot amount as a string.';
+COMMENT ON COLUMN EUROMILLIONS_DRAW_HISTORY.winners IS 'The number of jackpot winners for the draw.';

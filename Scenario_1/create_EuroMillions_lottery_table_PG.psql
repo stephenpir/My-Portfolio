@@ -1,0 +1,19 @@
+-- SQL script to create table for lottery draw history data.
+
+-- Drop table if they exist to ensure a clean setup
+DROP TABLE IF EXISTS public.euromillions_draw_history_PG;
+
+-- Create table for EuroMillions draw history_PG
+CREATE TABLE public.euromillions_draw_history_PG (
+    draw_date DATE,
+    ball_1 INT,
+    ball_2 INT,
+    ball_3 INT,
+    ball_4 INT,
+    ball_5 INT,
+    lucky_star_1 INT,
+    lucky_star_2 INT,
+    uk_millionaire_maker TEXT,
+    draw_number INT PRIMARY KEY
+);
+

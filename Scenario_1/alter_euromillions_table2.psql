@@ -1,0 +1,101 @@
+-- === Add and populate 'day_of_week' for EuroMillions table ===
+
+-- 1. Add a 'day_of_week' column to the table
+ALTER TABLE public.euromillions_draw_history_PG
+ADD COLUMN day_of_week VARCHAR(10);
+
+-- 2. Populate the new column with the day name extracted from the draw_date
+-- The TRIM function removes any trailing spaces from the day name.
+UPDATE public.euromillions_draw_history_PG
+SET day_of_week = TRIM(TO_CHAR(draw_date, 'Day'));
+
+-- You can verify the change with:
+-- SELECT draw_date, day_of_week FROM public.euromillions_draw_history_PG LIMIT 10;
+SELECT to_char(draw_date, 'YYYY-MON-DD'), * -- count(*) 
+FROM public.euromillions_draw_history_PG
+WHERE day_of_week NOT IN ('Tuesday', 'Friday');
+
+-- Remove data where load_number=2 to prep for replaying the data
+DELETE FROM public.euromillions_draw_history_PG
+WHERE load_number = 2; 
+
+---- 3. Remove spurious entries with invalid day_of_week values
+--DELETE FROM public.euromillions_draw_history_PG
+--WHERE day_of_week NOT IN ('Tuesday', 'Friday');
+
+
+
+
+-- -- === Populate missing draw_numbers in euromillions_draw_history_PG ===
+
+-- -- This script populates the draw_number for historical records where it is NULL.
+-- -- It works by finding the earliest draw that has a draw_number, and then
+-- -- sequencing all earlier draws relative to that anchor point.
+
+-- WITH anchor AS (
+--   -- 1. Find the anchor point: the earliest draw that has a number.
+--   SELECT
+--     draw_number,
+--     draw_date
+--   FROM public.euromillions_draw_history_PG
+--   WHERE draw_number IS NOT NULL
+--   ORDER BY draw_date ASC
+--   LIMIT 1
+-- ),
+-- updates AS (
+--   -- 2. For all draws before the anchor date that are missing a draw_number,
+--   --    calculate the correct number by creating a descending sequence.
+--   SELECT
+--     draw_date,
+--     -- The ROW_NUMBER() creates a sequence (1, 2, 3...) for the historical draws.
+--     -- Subtracting this from the anchor draw_number gives the correct historical number.
+--     (SELECT draw_number FROM anchor) - ROW_NUMBER() OVER (ORDER BY draw_date DESC) AS new_draw_number
+--   FROM public.euromillions_draw_history_PG
+--   WHERE draw_number IS NULL AND draw_date < (SELECT draw_date FROM anchor)
+-- )
+-- -- 3. Update the table with the newly calculated draw numbers.
+-- UPDATE public.euromillions_draw_history_PG t
+-- SET draw_number = u.new_draw_number
+-- FROM updates u
+-- WHERE t.draw_date = u.draw_date;
+
+-- -- Remove duplicates from EuroMillions table
+-- DELETE FROM public.euromillions_draw_history_PG
+-- WHERE ctid NOT IN (
+--     SELECT MIN(ctid)
+--     FROM public.euromillions_draw_history_PG
+--     GROUP BY draw_date, ball_1, ball_2, ball_3, ball_4, ball_5, lucky_star_1, lucky_star_2, uk_millionaire_maker, draw_number, winner, gain, day_of_week
+-- );
+
+-- -- === Correct and Re-sequence Gaps in draw_number ===
+
+-- -- This script recalculates the entire draw_number sequence to remove any gaps
+-- -- that may have been created by deleting duplicate rows. It ensures a continuous
+-- -- sequence based on the draw_date.
+
+-- WITH calculated_sequence AS (
+--   SELECT
+--     draw_date,
+--     -- This window function calculates a new, perfectly sequential draw number for every row.
+--     -- It starts from a calculated max value for the newest date and counts down.
+--     (
+--       -- Subquery to calculate the correct maximum draw number for the entire dataset
+--       SELECT
+--         -- Start with the highest known draw number from the original data
+--         (SELECT MAX(draw_number) FROM public.euromillions_draw_history_PG)
+--         +
+--         -- Add the count of draws that happened after that max draw number's date
+--         (SELECT COUNT(*) FROM public.euromillions_draw_history_PG WHERE draw_date > (SELECT MAX(draw_date) FROM public.euromillions_draw_history_PG WHERE draw_number = (SELECT MAX(draw_number) FROM public.euromillions_draw_history)))
+--     )
+--     -- Subtract the row number (ordered by date descending) to create the sequence
+--     - (ROW_NUMBER() OVER (ORDER BY draw_date DESC) - 1)
+--     AS new_draw_number
+--   FROM
+--     public.euromillions_draw_history_PG
+-- )
+-- -- Update the table, joining on draw_date to apply the new sequential draw_number
+-- UPDATE public.euromillions_draw_history_PG t
+-- SET draw_number = s.new_draw_number
+-- FROM calculated_sequence s
+-- WHERE t.draw_date = s.draw_date;
+

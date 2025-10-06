@@ -1,0 +1,27 @@
+-- Active: 1759151439047@@pg-3eaa1612-stephenpir-9959.c.aivencloud.com@22400@defaultdb
+
+-- Basic count and viewing loaded data
+select count(*) from euromillions_draw_history;
+select * from euromillions_draw_history order by draw_date desc limit 2000;
+
+-- Checking for dupilcate dated in the data
+select draw_date, count(*)
+from euromillions_draw_history
+group by draw_date
+having count(*) > 1
+order by draw_date desc
+limit 2000;
+
+
+select * -- count(*) 
+from euromillions_draw_history
+where day_of_week not in ('Tuesday', 'Friday')
+order by draw_date desc
+limit 2000;
+
+SELECT TRIM(TO_CHAR(draw_date, 'Day')), to_char(draw_date, 'YYYY-MON-DD'), * -- count(*) 
+FROM public.euromillions_draw_history
+ order by draw_date desc limit 2000;
+
+
+SELECT TRIM(TO_CHAR(to_date('2004-01-01', 'YYYY-MM-DD'), 'Day'));
