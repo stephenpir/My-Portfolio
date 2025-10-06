@@ -10,18 +10,28 @@ from sqlalchemy import text
 # Load environment variables from the .env file in the project root
 load_dotenv()
 
+class TerminalFilter(logging.Filter):
+    """A custom filter to prevent 'file_only' records from reaching the terminal."""
+    def filter(self, record):
+        # If the 'file_only' attribute is present and True, don't log to terminal.
+        return not getattr(record, 'file_only', False)
+
 def setup_logging():
     """Configures logging to output to both console and a file."""
     log_file = 'validation_report.log'
+    
+    # Create handlers
+    file_handler = logging.FileHandler(log_file, mode='w')
+    stream_handler = logging.StreamHandler(sys.stdout)
+    
+    # Add our custom filter to the terminal handler
+    stream_handler.addFilter(TerminalFilter())
     
     # Configure root logger
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, mode='w'), # Overwrite log file on each run
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[file_handler, stream_handler]
     )
     
     # Suppress the noisy UserWarning from pandas about non-SQLAlchemy DBAPI2 objects
@@ -105,8 +115,8 @@ def standardize_dataframe(df, source_name):
 
     # Define the core columns for comparison
     core_columns = [
-        'draw_date', 'ball_1', 'ball_2', 'ball_3', 'ball_4', 'ball_5',
-        'lucky_star_1', 'lucky_star_2'
+        'draw_date', 'draw_number', 'ball_1', 'ball_2', 'ball_3', 'ball_4',
+        'ball_5', 'lucky_star_1', 'lucky_star_2'
     ]
     
     # Ensure all core columns exist
@@ -125,11 +135,18 @@ def main():
     # Step 1: Configure logging
     setup_logging()
     logging.info("--- Starting Data Validation ---")
+
+    # Prompt user for detailed terminal output
+    show_details_in_terminal = input("Show detailed line-by-line results in the terminal? (y/n): ").lower().strip() == 'y'
+    if show_details_in_terminal:
+        logging.info("Detailed results will be shown in the terminal and saved to validation_report.log.")
+    else:
+        logging.info("Progress will be shown in the terminal. Detailed results will be saved to validation_report.log.")
     
     # Step 2: Initialize Oracle Client
     initialize_oracle_client()
 
-    # Step 2: Fetch data from both databases
+    # Step 3: Fetch data from both databases
     oracle_df = get_oracle_data()
     postgres_df = get_postgres_data()
 
@@ -137,7 +154,7 @@ def main():
         logging.error("Could not retrieve data from one or both databases. Exiting.")
         sys.exit(1)
 
-    # Step 3: Standardize dataframes
+    # Step 4: Standardize dataframes
     logging.info("Standardizing data for comparison...")
     try:
         oracle_std_df = standardize_dataframe(oracle_df, "Oracle")
@@ -146,8 +163,8 @@ def main():
         logging.error(f"Column error: {e}")
         sys.exit(1)
 
-    # Step 4: Merge the dataframes on draw_date to find matches and differences
-    logging.info("Comparing datasets...")
+    # Step 5: Merge the dataframes on draw_date to find matches and differences
+    logging.info("Comparing datasets by merging on 'draw_date'...")
     comparison_df = pd.merge(
         postgres_std_df,
         oracle_std_df,
@@ -157,26 +174,28 @@ def main():
         indicator=True
     )
 
-    # --- Analysis ---
+    # --- Step 6: Analysis and Reporting ---
     logging.info("--- Validation Report ---")
 
     # Find rows only in PostgreSQL
     pg_only = comparison_df[comparison_df['_merge'] == 'left_only']
     if not pg_only.empty:
+        pg_only_details = pg_only[['draw_date']].to_string(index=False)
         logging.info(f"Found {len(pg_only)} draws that exist ONLY in PostgreSQL.")
-        logging.info("\n" + pg_only[['draw_date']].to_string(index=False))
+        logging.info("\n" + pg_only_details, extra={'file_only': not show_details_in_terminal})
 
     # Find rows only in Oracle
     ora_only = comparison_df[comparison_df['_merge'] == 'right_only']
     if not ora_only.empty:
+        ora_only_details = ora_only[['draw_date']].to_string(index=False)
         logging.info(f"Found {len(ora_only)} draws that exist ONLY in Oracle.")
-        logging.info("\n" + ora_only[['draw_date']].to_string(index=False))
+        logging.info("\n" + ora_only_details, extra={'file_only': not show_details_in_terminal})
 
     # Find rows in both and check for mismatches
     both_df = comparison_df[comparison_df['_merge'] == 'both'].copy()
-    mismatches = []
     if not both_df.empty:
-        logging.info(f"Found {len(both_df)} draws common to both databases. Checking for data mismatches...")
+        logging.info(f"Found {len(both_df)} common draws. Now checking for data mismatches...")
+        both_df['draw_number_match'] = (both_df['draw_number_pg'] == both_df['draw_number_ora'])
         # Compare each ball and lucky star column
         for i in range(1, 6): # Balls 1-5
             both_df[f'ball_{i}_match'] = (both_df[f'ball_{i}_pg'] == both_df[f'ball_{i}_ora'])
@@ -187,13 +206,17 @@ def main():
         mismatches = both_df[~both_df[match_cols].all(axis=1)]
 
     if not mismatches.empty:
-        logging.warning(f"Found {len(mismatches)} draws with mismatched ball/star numbers:")
-        mismatch_cols = ['draw_date'] + [f'ball_{i}_pg' for i in range(1,6)] + [f'ball_{i}_ora' for i in range(1,6)]
-        logging.warning("\n" + mismatches[mismatch_cols].head().to_string())
+        mismatch_display_cols = [
+            'draw_date', 'draw_number_pg', 'draw_number_ora', 'ball_1_pg', 'ball_1_ora'
+        ]
+        mismatch_details = mismatches[mismatch_display_cols].to_string()
+        logging.warning(f"Found {len(mismatches)} draws with mismatched data.")
+        logging.warning("\n" + mismatch_details, extra={'file_only': not show_details_in_terminal})
+
     elif not both_df.empty:
-        logging.info("All common records have matching ball and lucky star numbers.")
+        logging.info("SUCCESS: All common records have matching data.")
     
-    logging.info("--- Validation Complete ---")
+    logging.info("--- Validation Complete. Full report saved to validation_report.log ---")
 
 if __name__ == "__main__":
     main()
