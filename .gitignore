@@ -6,3 +6,6 @@ __pycache__/
 
 # Ignore log files
 *.log
+
+# Ignore generated plots from analysis
+plots/
