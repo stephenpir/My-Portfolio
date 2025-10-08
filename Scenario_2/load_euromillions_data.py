@@ -75,33 +75,51 @@ def process_and_load_data(connection):
         df['draw_number'] = df.index + 1
         df = df.where(pd.notna(df), None)
 
-        data_to_insert = [
+        # Reorder columns to match the MERGE statement's bind variables
+        data_for_upsert = [
             (
-                row['draw_number'], row['draw_date'],
+                row['draw_date'],
                 row['ball_1'], row['ball_2'], row['ball_3'], row['ball_4'], row['ball_5'],
                 row['lucky_star_1'], row['lucky_star_2'],
-                row['jackpot'], row['winners']
+                row['jackpot'], row['winners'],
+                row['draw_number'] # draw_number is now last
             )
             for _, row in df.iterrows()
         ]
 
         with connection.cursor() as cursor:
-            # Optional: Truncate the table to prevent duplicate data on re-runs
-            # print("Truncating table EUROMILLIONS_DRAW_HISTORY...")
-            # cursor.execute("TRUNCATE TABLE EUROMILLIONS_DRAW_HISTORY")
-
-            sql = """
-                INSERT INTO EUROMILLIONS_DRAW_HISTORY (
-                    draw_number, draw_date, ball_1, ball_2, ball_3, ball_4, ball_5,
-                    lucky_star_1, lucky_star_2, jackpot, winners
-                ) VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11)
+            # The MERGE statement performs an "upsert" operation.
+            # To prevent "ORA-12838: cannot read/modify an object after modifying it in parallel",
+            # we explicitly disable parallel DML for this session. This forces the MERGE
+            # to run serially, avoiding the conflict of reading and writing to the same
+            # table in a parallelized operation.
+            cursor.execute("ALTER SESSION DISABLE PARALLEL DML")
+            # It uses the draw_date to check for existing records.
+            merge_sql = """
+                MERGE INTO EUROMILLIONS_DRAW_HISTORY target
+                USING (SELECT :1 AS draw_date FROM DUAL) source
+                ON (target.draw_date = source.draw_date)
+                WHEN MATCHED THEN
+                    UPDATE SET
+                        target.ball_1 = :2, target.ball_2 = :3, target.ball_3 = :4,
+                        target.ball_4 = :5, target.ball_5 = :6,
+                        target.lucky_star_1 = :7, target.lucky_star_2 = :8,
+                        target.jackpot = :9, target.winners = :10,
+                        target.draw_number = :11
+                WHEN NOT MATCHED THEN
+                    INSERT (
+                        draw_date, ball_1, ball_2, ball_3, ball_4, ball_5,
+                        lucky_star_1, lucky_star_2, jackpot, winners, draw_number
+                    ) VALUES (
+                        :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11
+                    )
             """
-            print(f"Inserting {len(data_to_insert)} rows into the database...")
-            cursor.executemany(sql, data_to_insert, batcherrors=True)
+            print(f"Upserting {len(data_for_upsert)} rows into the database...")
+            cursor.executemany(merge_sql, data_for_upsert, batcherrors=True)
 
             # Check for batch errors
             for error in cursor.getbatcherrors():
-                print(f"Error inserting row {error.offset}: {error.message}", file=sys.stderr)
+                print(f"Error upserting row {error.offset}: {error.message}", file=sys.stderr)
 
             connection.commit()
             print(f"Successfully committed {cursor.rowcount} rows to EUROMILLIONS_DRAW_HISTORY.")

@@ -58,41 +58,56 @@ def load_to_sql_server():
     try:
         # Read the JSON file into a Spark DataFrame
         logging.info(f"Reading JSON data from {JSON_INPUT_PATH}")
-        df_spark = spark.read.json(JSON_INPUT_PATH)
+        df_new = spark.read.json(JSON_INPUT_PATH)
 
         # Ensure column names are SQL Server compatible (e.g., lowercase)
-        df_spark = df_spark.toDF(*[c.lower() for c in df_spark.columns])
+        df_new = df_new.toDF(*[c.lower() for c in df_new.columns])
 
-        logging.info("Schema of the DataFrame to be loaded:")
-        df_spark.printSchema()
+        logging.info("Schema of the new DataFrame to be loaded:")
+        df_new.printSchema()
 
-        # --- Conditional Table Creation and Load ---
-        # Check if the table exists. If it does, we'll append. If not, we'll create it by overwriting.
+        # --- Spark-Side Upsert Logic (No Temp Table) ---
+
+        # Step 1: Read existing data from SQL Server.
+        # If the table doesn't exist, this will raise an exception,
+        # and we'll handle it by creating an empty DataFrame.
         try:
-            # Attempt a read to see if the table exists. This is a common JDBC pattern.
-            spark.read.jdbc(url=sql_server_jdbc_url, table=SQL_SERVER_TABLE_NAME, properties=connection_properties).limit(1).collect()
-            logging.info(f"Table '{SQL_SERVER_TABLE_NAME}' already exists. Appending data.")
-            write_mode = "append"
+            logging.info(f"Reading existing data from SQL Server table '{SQL_SERVER_TABLE_NAME}'...")
+            df_existing = spark.read.jdbc(
+                url=sql_server_jdbc_url,
+                table=SQL_SERVER_TABLE_NAME,
+                properties=connection_properties
+            )
+            logging.info(f"Found {df_existing.count()} existing rows.")
         except Exception as e:
-            # The read fails if the table doesn't exist.
-            logging.info(f"Table '{SQL_SERVER_TABLE_NAME}' does not exist or is not accessible. Attempting to create it.")
-            logging.debug(f"Underlying error: {e}") # Log the actual error for debugging
-            # 'overwrite' will create the table and write the data in one step.
-            write_mode = "overwrite"
+            logging.warning(f"Could not read from '{SQL_SERVER_TABLE_NAME}'. Assuming it's the first run. Details: {e}")
+            # Create an empty DataFrame with the same schema as the new data
+            df_existing = spark.createDataFrame([], df_new.schema)
 
-        # Write the DataFrame to the SQL Server table using the determined mode.
-        if write_mode == "overwrite":
-            logging.info(f"Creating table '{SQL_SERVER_TABLE_NAME}' and writing {df_spark.count()} rows...")
-        else:
-            logging.info(f"Appending {df_spark.count()} rows to table '{SQL_SERVER_TABLE_NAME}'...")
+        # Step 2: Perform a full outer join on the primary key (draw_date).
+        # We alias the dataframes to avoid column ambiguity issues.
+        join_condition = df_new.alias("n").draw_date == df_existing.alias("e").draw_date
+        df_joined = df_new.alias("n").join(df_existing.alias("e"), join_condition, "full_outer")
 
-        df_spark.write.jdbc(
+        # Step 3: Merge the columns using coalesce.
+        # coalesce(col1, col2) returns the first non-null value.
+        # This ensures that new/updated data from df_new is prioritized.
+        from pyspark.sql.functions import col, coalesce
+        select_expr = [
+            coalesce(col(f"n.{c}"), col(f"e.{c}")).alias(c) for c in df_new.columns
+        ]
+        df_final = df_joined.select(select_expr)
+
+        # Step 4: Overwrite the target table with the final merged data.
+        # This operation is not atomic and will drop/recreate the table.
+        logging.info(f"Writing {df_final.count()} rows to '{SQL_SERVER_TABLE_NAME}' with mode 'overwrite'...")
+        df_final.write.jdbc(
             url=sql_server_jdbc_url,
             table=SQL_SERVER_TABLE_NAME,
-            mode=write_mode,
+            mode="overwrite",
             properties=connection_properties
         )
-        logging.info("Data loaded successfully into SQL Server.")
+        logging.info("Data write operation completed successfully.")
 
     except Exception as e:
         logging.error(f"An error occurred during the Spark job: {e}")
