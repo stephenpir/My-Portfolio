@@ -1,2 +1,84 @@
 Select COUNT(*) from EUROMILLIONS_DRAW_HISTORY;
 Select * from EUROMILLIONS_DRAW_HISTORY;
+
+select * from euromillions_draw_history
+order by draw_number desc;
+
+--- PyTorch Predicted Numbers for the Next Draw --- 
+Suggested Main Balls: [19, 23, 42, 44, 50] -- No matches
+Suggested Lucky Stars: [2, 8] -- 1 match
+
+--- ML Predicted Numbers for the Next Draw ---
+Suggested Main Balls: [4, 13, 17, 26, 48] -- 1 match
+Suggested Lucky Stars: [2, 8] -- 1 match
+
+--- Prediction based on: Least Frequent Numbers ---
+Suggested Main Balls: [18, 22, 33, 41, 46] -- No matches
+Suggested Lucky Stars: [11, 12] -- No matches
+--- Prediction based on: Most Frequent Numbers ---
+Suggested Main Balls: [19, 21, 23, 42, 44] -- 1 match
+Suggested Lucky Stars: [2, 3] -- No matches
+--- Prediction based on: Most Overdue (Hot) Numbers ---
+Suggested Main Balls: [20, 21, 22, 49, 50] -- No matches
+Suggested Lucky Stars: [4, 10] -- No matches
+
+
+--- ML Predicted Numbers (based on Entire History) ---
+Suggested Main Balls: [4, 13, 17, 26, 48] -- 1 match
+Suggested Lucky Stars: [2, 8] -- 1 match
+--- ML Predicted Numbers (based on Tuesday Draws Only) ---
+Suggested Main Balls: [13, 24, 33, 36, 40] -- No matches
+Suggested Lucky Stars: [2, 5] -- 1 match
+--- ML Predicted Numbers (based on Friday Draws Only) ---
+Suggested Main Balls: [4, 17, 25, 31, 45] -- No matches
+Suggested Lucky Stars: [8, 9] -- 1 match
+
+
+--- PyTorch Predicted Numbers (based on Entire History) ---
+Suggested Main Balls: [19, 23, 29, 42, 44] -- No matches
+Suggested Lucky Stars: [2, 8] -- 1 match
+--- PyTorch Predicted Numbers (based on Tuesday Draws Only) ---
+Suggested Main Balls: [7, 15, 20, 27, 44] -- No matches
+Suggested Lucky Stars: [2, 6] -- No matches
+--- PyTorch Predicted Numbers (based on Friday Draws Only) ---
+Suggested Main Balls: [19, 23, 29, 45, 50]  -- 1 match
+Suggested Lucky Stars: [10, 11] -- No matches
+
+
+
+--INSERT INTO euromillions_draw_history ( draw_number, draw_date, ball_1, ball_2, ball_3, ball_4, ball_5, lucky_star_1, lucky_star_2, jackpot, winners
+--) VALUES ( 
+-- 1883, '07-OCT-25',
+--           29,
+--           39,
+--           42,
+--           43,
+--           48,
+--           05,
+--           08,
+--           '£14,773,000',
+--            0);
+
+--- ML Predicted Numbers (based on Entire History) ---
+Suggested Main Balls: [1, 6, 10, 11, 45]
+Suggested Lucky Stars: [2, 6]
+--- ML Predicted Numbers (based on Tuesday Draws Only) ---
+Suggested Main Balls: [3, 8, 15, 24, 48]
+Suggested Lucky Stars: [2, 8]
+--- ML Predicted Numbers (based on Friday Draws Only) ---
+Suggested Main Balls: [4, 17, 25, 31, 45]
+Suggested Lucky Stars: [8, 9]
+
+--- PyTorch Predicted Numbers (based on Entire History) ---
+Suggested Main Balls: [19, 21, 23, 29, 44]
+Suggested Lucky Stars: [2, 3]
+--- PyTorch Predicted Numbers (based on Tuesday Draws Only) ---
+Suggested Main Balls: [20, 25, 27, 42, 44]
+Suggested Lucky Stars: [8, 11]
+--- PyTorch Predicted Numbers (based on Friday Draws Only) ---
+Suggested Main Balls: [4, 19, 21, 23, 50]
+Suggested Lucky Stars: [7, 10]
+
+
+8, 19, 23, 44, 45  -- 2
+8, 19, 23, 44, 45  -- 2, 8

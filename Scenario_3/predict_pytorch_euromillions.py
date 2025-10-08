@@ -236,17 +236,40 @@ def main_pytorch():
 
     df = standardize_dataframe(df_raw)
 
+    # --- Data Filtering Choice ---
+    print("Please choose the dataset to use for prediction:")
+    print("  1. Entire History (All Draws)")
+    print("  2. Tuesday Draws Only")
+    print("  3. Friday Draws Only")
+
+    filter_choice = ''
+    while filter_choice not in ['1', '2', '3']:
+        filter_choice = input("\nEnter your choice (1-3): ").strip()
+        if filter_choice not in ['1', '2', '3']:
+            print("Invalid choice. Please enter a number between 1 and 3.")
+
+    df_filtered = df.copy() # Start with the full dataframe
+    filter_desc = "Entire History"
+    if filter_choice == '2':
+        df_filtered = df[df['draw_date'].dt.day_name() == 'Tuesday'].copy()
+        filter_desc = "Tuesday Draws Only"
+        logging.info(f"Filtering dataset for Tuesday draws. Found {len(df_filtered)} records.")
+    elif filter_choice == '3':
+        df_filtered = df[df['draw_date'].dt.day_name() == 'Friday'].copy()
+        filter_desc = "Friday Draws Only"
+        logging.info(f"Filtering dataset for Friday draws. Found {len(df_filtered)} records.")
+
     # Define parameters for feature creation
     lag_features = 5
     recent_freq_window = 20
 
     min_draws_needed = max(lag_features, recent_freq_window) + 1
-    if len(df) < min_draws_needed:
-        logging.error(f"Not enough historical data ({len(df)} draws) to create ML features.")
-        logging.error(f"Need at least {min_draws_needed} draws. Exiting.")
+    if len(df_filtered) < min_draws_needed:
+        logging.error(f"Not enough historical data in the selected subset ({len(df_filtered)} draws) to create ML features.")
+        logging.error(f"Need at least {min_draws_needed} draws for current settings (lag={lag_features}, freq_window={recent_freq_window}). Exiting.")
         sys.exit(1)
 
-    X, y_main, y_stars = create_ml_features_and_targets(df, lag_features, recent_freq_window)
+    X, y_main, y_stars = create_ml_features_and_targets(df_filtered, lag_features, recent_freq_window)
 
     if X.shape[0] <= 1:
         logging.error("Not enough samples generated to train and predict. Need at least 2. Exiting.")
@@ -254,7 +277,7 @@ def main_pytorch():
 
     predicted_main_balls, predicted_lucky_stars = train_and_predict_pytorch(X, y_main, y_stars)
 
-    print(f"--- PyTorch Predicted Numbers for the Next Draw ---")
+    print(f"\n--- PyTorch Predicted Numbers (based on {filter_desc}) ---")
     print(f"Suggested Main Balls: {predicted_main_balls}")
     print(f"Suggested Lucky Stars: {predicted_lucky_stars}\n")
 
