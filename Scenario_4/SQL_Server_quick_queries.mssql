@@ -1,0 +1,10 @@
+use StephenSandbox
+go
+
+select * from [dbo].[euromillions_draw_history_sqlserver];
+
+ --drop table [dbo].[euromillions_draw_history_sqlserver];
+
+ --truncate table [dbo].[euromillions_draw_history_sqlserver];
+
+ -- update [dbo].[euromillions_draw_history_sqlserver] set ball_1 = 1 --where draw_number > 1000;

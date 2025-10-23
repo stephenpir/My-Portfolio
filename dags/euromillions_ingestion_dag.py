@@ -55,10 +55,13 @@ def euromillions_ingestion_dag():
 
     # These can run in parallel with the Oracle load
     load_source1_to_pg = BashOperator(task_id="load_source1_to_pg", bash_command=f"python '{PROJECT_ROOT}/Scenario_1/load_source1_Euromillions_lottery_data_to_postgres.py'")
-    load_source2_to_pg = BashOperator(task_id="load_source2_to_pg", bash_command=f"python '{PROJECT_ROOT}/Scenario_1/load_source2_Euromillions_lottery_data_to_postgres.py'")
+    # Source 2 loading is commented out due to poor data quality
+    #load_source2_to_pg = BashOperator(task_id="load_source2_to_pg", bash_command=f"python '{PROJECT_ROOT}/Scenario_1/load_source2_Euromillions_lottery_data_to_postgres.py'")
 
     # Define task dependencies
     scrape_data >> load_scraped_to_oracle
-    [load_scraped_to_oracle, load_source1_to_pg, load_source2_to_pg] >> run_validation()
+    [load_scraped_to_oracle, load_source1_to_pg] >> run_validation()
+    # Source 2 loading is commented out due to poor data quality
+    #[load_scraped_to_oracle, load_source1_to_pg, load_source2_to_pg] >> run_validation()
 
 euromillions_ingestion_dag()

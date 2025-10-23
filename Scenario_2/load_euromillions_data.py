@@ -4,8 +4,12 @@ import os
 import sys
 from dotenv import load_dotenv
 
+# Define the project root directory to build absolute paths
+# Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Load environment variables from .env file located in the parent directory
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, '.env'))
 
 class Config:
     """Centralized configuration for database and file paths."""
@@ -16,14 +20,14 @@ class Config:
 
     # --- Connection & Client Paths ---
     # TNS alias from tnsnames.ora in your wallet
-    DB_DSN = os.getenv("ORACLE_DB_DSN")
-    # Absolute path to the unzipped Oracle Instant Client directory
-    INSTANT_CLIENT_PATH = os.getenv("ORACLE_INSTANT_CLIENT_PATH")
-    # Absolute path to the unzipped Oracle Wallet directory
-    WALLET_PATH = os.getenv("ORACLE_WALLET_PATH")
+    DB_DSN = os.getenv("ORACLE_DB_DSN") # This remains as is
+    # Directory names for client and wallet, relative to project root
+    INSTANT_CLIENT_DIR_NAME = os.getenv("ORACLE_INSTANT_CLIENT_DIR_NAME")
+    WALLET_DIR_NAME = os.getenv("ORACLE_WALLET_DIR_NAME")
 
     # --- File Paths ---
-    CSV_FILE_PATH = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_2/euromillions_draw_history_scraped.csv"
+    # Build path relative to project root
+    CSV_FILE_PATH = os.path.join(PROJECT_ROOT, "Scenario_2", "euromillions_draw_history_scraped.csv")
 
 def initialize_oracle_client():
     """
@@ -31,12 +35,18 @@ def initialize_oracle_client():
     Returns True on success, False on failure.
     """
     try:
-        oracledb.init_oracle_client(lib_dir=Config.INSTANT_CLIENT_PATH, config_dir=Config.WALLET_PATH)
+        if not all([Config.INSTANT_CLIENT_DIR_NAME, Config.WALLET_DIR_NAME]):
+            print("Error: Oracle directory names are not set in the environment.", file=sys.stderr)
+            print("Please ensure ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME are set.", file=sys.stderr)
+            return False
+
+        client_path = os.path.join(PROJECT_ROOT, Config.INSTANT_CLIENT_DIR_NAME)
+        wallet_path = os.path.join(PROJECT_ROOT, Config.WALLET_DIR_NAME)
+        oracledb.init_oracle_client(lib_dir=client_path, config_dir=wallet_path)
         return True
     except oracledb.Error as e:
         print(f"Error initializing Oracle Client: {e}", file=sys.stderr)
-        print("Please check the following:", file=sys.stderr)
-        print(f"1. The Instant Client path is correct: '{Config.INSTANT_CLIENT_PATH}'", file=sys.stderr)
+        print(f"1. The Instant Client directory name is correct: '{Config.INSTANT_CLIENT_DIR_NAME}'", file=sys.stderr)
         print("2. You have downloaded the correct 'Intel (x86)' version for your Anaconda environment.", file=sys.stderr)
         print("3. You have run 'sudo xattr -r -d com.apple.quarantine ...' on the Instant Client directory.", file=sys.stderr)
         return False
@@ -47,13 +57,14 @@ def create_connection():
     Assumes the Oracle client has already been initialized.
     """
     try:
+        wallet_path = os.path.join(PROJECT_ROOT, Config.WALLET_DIR_NAME)
         connection = oracledb.connect(
             user=Config.DB_USER,
             password=Config.DB_PASSWORD,
             dsn=Config.DB_DSN,
             wallet_password=Config.WALLET_PASSWORD,
-            config_dir=Config.WALLET_PATH,
-            wallet_location=Config.WALLET_PATH
+            config_dir=wallet_path,
+            wallet_location=wallet_path
         )
         print("Successfully connected to Oracle Database")
         return connection

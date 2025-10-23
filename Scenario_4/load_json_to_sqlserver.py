@@ -5,9 +5,13 @@ from pyspark.sql import SparkSession
 import logging
 
 # --- Configuration ---
+# Define the project root directory to build absolute paths
+# Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+logging.info(f"Project root directory set to: {PROJECT_ROOT}")
 
-# Load environment variables from .env file located in the parent directory
-dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+# Load environment variables from .env file
+dotenv_path = os.path.join(PROJECT_ROOT, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
 # Setup basic logging
@@ -18,15 +22,20 @@ logging.basicConfig(
 )
 
 # --- File Paths ---
-INPUT_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_DIR = os.path.join(PROJECT_ROOT, "Scenario_4")
 JSON_INPUT_PATH = os.path.join(INPUT_DIR, "euromillions_draw_history_from_oracle.json")
 
-# --- Constants ---
 SQL_SERVER_TABLE_NAME = "euromillions_draw_history_sqlserver"
+SQL_SERVER_STAGING_TABLE_NAME = "euromillions_draw_history_sqlserver_staging"
 
 def load_to_sql_server():
     """Loads the JSON data into a SQL Server table using PySpark."""
     logging.info("Starting process to load data into SQL Server...")
+
+    # Pre-flight check: Ensure JAVA_HOME is set, as PySpark requires it.
+    if not os.getenv('JAVA_HOME'):
+        logging.error("JAVA_HOME environment variable is not set. PySpark requires Java to be installed and JAVA_HOME to be configured.")
+        sys.exit(1)
 
     if not os.path.exists(JSON_INPUT_PATH):
         logging.error(f"Input file not found: {JSON_INPUT_PATH}")
@@ -36,10 +45,18 @@ def load_to_sql_server():
     # --- SQL Server Connection Properties ---
     sql_server_jdbc_url = os.getenv("SQLSERVER_JDBC_URL")
     sql_server_driver = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
-    sql_server_jar_path = os.getenv("SQLSERVER_JAR_PATH")
+    # Get the relative path from the environment variable and remove any leading slashes
+    relative_jar_path = os.getenv("SQLSERVER_JAR_PATH", "").lstrip("/")
+    # Construct the absolute path by joining with the project root
+    sql_server_jar_path = os.path.join(PROJECT_ROOT, relative_jar_path)
 
     if not all([sql_server_jdbc_url, sql_server_jar_path]):
         logging.error("One or more SQL Server environment variables are not set. (SQLSERVER_JDBC_URL, SQLSERVER_JAR_PATH)")
+        sys.exit(1)
+
+    # Pre-flight check: Ensure the JDBC driver JAR exists before starting Spark.
+    if not os.path.exists(sql_server_jar_path):
+        logging.error(f"SQL Server JDBC driver not found at: {sql_server_jar_path}")
         sys.exit(1)
 
     connection_properties = {
@@ -66,51 +83,62 @@ def load_to_sql_server():
         logging.info("Schema of the new DataFrame to be loaded:")
         df_new.printSchema()
 
-        # --- Spark-Side Upsert Logic (No Temp Table) ---
+        # --- Upsert Logic using a Staging Table and MERGE statement ---
 
-        # Step 1: Read existing data from SQL Server.
-        # If the table doesn't exist, this will raise an exception,
-        # and we'll handle it by creating an empty DataFrame.
-        try:
-            logging.info(f"Reading existing data from SQL Server table '{SQL_SERVER_TABLE_NAME}'...")
-            df_existing = spark.read.jdbc(
-                url=sql_server_jdbc_url,
-                table=SQL_SERVER_TABLE_NAME,
-                properties=connection_properties
-            )
-            logging.info(f"Found {df_existing.count()} existing rows.")
-        except Exception as e:
-            logging.warning(f"Could not read from '{SQL_SERVER_TABLE_NAME}'. Assuming it's the first run. Details: {e}")
-            # Create an empty DataFrame with the same schema as the new data
-            df_existing = spark.createDataFrame([], df_new.schema)
-
-        # Step 2: Perform a full outer join on the primary key (draw_date).
-        # We alias the dataframes to avoid column ambiguity issues.
-        join_condition = df_new.alias("n").draw_date == df_existing.alias("e").draw_date
-        df_joined = df_new.alias("n").join(df_existing.alias("e"), join_condition, "full_outer")
-
-        # Step 3: Merge the columns using coalesce.
-        # coalesce(col1, col2) returns the first non-null value.
-        # This ensures that new/updated data from df_new is prioritized.
-        from pyspark.sql.functions import col, coalesce
-        select_expr = [
-            coalesce(col(f"n.{c}"), col(f"e.{c}")).alias(c) for c in df_new.columns
-        ]
-        df_final = df_joined.select(select_expr)
-
-        # Step 4: Overwrite the target table with the final merged data.
-        # This operation is not atomic and will drop/recreate the table.
-        logging.info(f"Writing {df_final.count()} rows to '{SQL_SERVER_TABLE_NAME}' with mode 'overwrite'...")
-        df_final.write.jdbc(
+        # Step 1: Write the new data to a temporary staging table, always overwriting it.
+        logging.info(f"Writing {df_new.count()} new/updated rows to staging table '{SQL_SERVER_STAGING_TABLE_NAME}'...")
+        df_new.write.jdbc(
             url=sql_server_jdbc_url,
-            table=SQL_SERVER_TABLE_NAME,
+            table=SQL_SERVER_STAGING_TABLE_NAME,
             mode="overwrite",
             properties=connection_properties
         )
-        logging.info("Data write operation completed successfully.")
+
+        # Step 2: Use a MERGE statement to upsert data from staging to the final table.
+        # This is executed on the SQL Server side via a JDBC connection.
+        merge_sql = f"""
+        MERGE {SQL_SERVER_TABLE_NAME} AS Target
+        USING {SQL_SERVER_STAGING_TABLE_NAME} AS Source
+        ON Target.draw_date = Source.draw_date
+        -- When records match, update the target table
+        WHEN MATCHED THEN
+            UPDATE SET
+                Target.ball_1 = Source.ball_1,
+                Target.ball_2 = Source.ball_2,
+                Target.ball_3 = Source.ball_3,
+                Target.ball_4 = Source.ball_4,
+                Target.ball_5 = Source.ball_5,
+                Target.lucky_star_1 = Source.lucky_star_1,
+                Target.lucky_star_2 = Source.lucky_star_2,
+                Target.jackpot = Source.jackpot,
+                Target.winners = Source.winners
+        -- When records don't match, insert the new record from the source
+        WHEN NOT MATCHED BY TARGET THEN
+            INSERT (draw_date, ball_1, ball_2, ball_3, ball_4, ball_5, lucky_star_1, lucky_star_2, jackpot, winners)
+            VALUES (Source.draw_date, Source.ball_1, Source.ball_2, Source.ball_3, Source.ball_4, Source.ball_5, Source.lucky_star_1, Source.lucky_star_2, Source.jackpot, Source.winners);
+        """
+
+        logging.info("Executing MERGE statement on SQL Server to perform upsert...")
+        try:
+            # We need a connection to execute a raw SQL statement.
+            # PySpark's `write.jdbc` doesn't support executing arbitrary DML.
+            from java.sql import DriverManager
+            conn = DriverManager.getConnection(sql_server_jdbc_url, connection_properties['user'], connection_properties['password'])
+            conn.createStatement().execute(merge_sql)
+            conn.close()
+            logging.info("MERGE operation completed successfully.")
+        except Exception as e:
+            logging.error(f"Failed to execute MERGE statement. This can happen on the first run if the target table '{SQL_SERVER_TABLE_NAME}' does not exist.")
+            logging.error(f"Error details: {e}")
+            logging.info("Attempting to write directly to the target table as a fallback for the first run.")
+            # Fallback for the first run: if the target table doesn't exist, MERGE fails.
+            # In this case, we just copy the staging data to the final table.
+            df_new.write.jdbc(url=sql_server_jdbc_url, table=SQL_SERVER_TABLE_NAME, mode="append", properties=connection_properties)
+            logging.info("Fallback write completed. The target table has been created.")
 
     except Exception as e:
         logging.error(f"An error occurred during the Spark job: {e}")
+        sys.exit(1) # Ensure the script exits with a non-zero status on critical errors
     finally:
         # Stop Spark session
         logging.info("Stopping Spark session.")

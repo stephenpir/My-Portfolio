@@ -31,6 +31,7 @@ def euromillions_analysis_dag():
     """
     Orchestrates running analysis and prediction scripts.
     """
+
     run_statistical_analysis = BashOperator(
         task_id="run_statistical_analysis",
         bash_command=(
@@ -41,17 +42,17 @@ def euromillions_analysis_dag():
 
     run_stat_prediction = BashOperator(
         task_id="run_statistical_prediction",
-        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_euromillions_numbers.py' --strategy {{ params.stat_strategy }}",
+        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_euromillions_numbers.py' --strategy '{{{{ params.stat_strategy }}}}'",
     )
 
     run_ml_prediction = BashOperator(
         task_id="run_ml_prediction",
-        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_ml_euromillions.py' --filter {{ params.ml_filter }}",
+        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_ml_euromillions.py' --filter '{{{{ params.ml_filter }}}}'",
     )
 
     run_pytorch_prediction = BashOperator(
         task_id="run_pytorch_prediction",
-        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_pytorch_euromillions.py' --filter {{ params.ml_filter }}",
+        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_pytorch_euromillions.py' --filter '{{{{ params.ml_filter }}}}'",
     )
 
     # Define task dependencies: Analysis runs first, then all predictions can run in parallel.

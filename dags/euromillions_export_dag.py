@@ -26,6 +26,7 @@ def euromillions_export_dag():
     """
     Orchestrates exporting data from Oracle and loading it to SQL Server.
     """
+
     export_from_oracle = BashOperator(
         task_id="export_oracle_to_files",
         bash_command=f"python '{PROJECT_ROOT}/Scenario_4/export_oracle_to_local_files.py'",
@@ -36,6 +37,6 @@ def euromillions_export_dag():
         bash_command=f"python '{PROJECT_ROOT}/Scenario_4/load_json_to_sqlserver.py'",
     )
 
-    export_from_oracle >> load_to_sqlserver
+    export_from_oracle >> load_to_sqlserver # This is a simple chain
 
 euromillions_export_dag()

@@ -4,10 +4,16 @@ import os
 import sys
 import random
 from dotenv import load_dotenv
+import argparse
 import logging
+import warnings
+
+# Define the project root directory to build absolute paths
+# Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # Load environment variables from the .env file in the project root
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, '.env'))
 
 def setup_logging():
     """Configures basic logging."""
@@ -16,36 +22,50 @@ def setup_logging():
         format='%(asctime)s - %(levelname)s - %(message)s',
         stream=sys.stdout
     )
-    # Suppress noisy warnings from pandas when using a raw DBAPI2 connection
-    import warnings
     warnings.filterwarnings("ignore", category=UserWarning, module="pandas")
 
 def initialize_oracle_client():
     """Initializes the Oracle Client. Exits on failure."""
     try:
-        oracledb.init_oracle_client(
-            lib_dir=os.getenv("ORACLE_INSTANT_CLIENT_PATH"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH")
-        )
+        # Construct absolute paths relative to the project root
+        client_dir_name = os.getenv("ORACLE_INSTANT_CLIENT_DIR_NAME")
+        wallet_dir_name = os.getenv("ORACLE_WALLET_DIR_NAME")
+
+        if not all([client_dir_name, wallet_dir_name]):
+            logging.error("Oracle directory names are not set in the environment.")
+            logging.error("Please ensure ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME are in your .env file or environment variables.")
+            sys.exit(1)
+
+        client_path = os.path.join(PROJECT_ROOT, client_dir_name)
+        wallet_path = os.path.join(PROJECT_ROOT, wallet_dir_name)
+
+        oracledb.init_oracle_client(lib_dir=client_path, config_dir=wallet_path)
+        logging.info("Oracle Client initialized successfully.")
     except oracledb.Error as e:
         logging.error(f"Error initializing Oracle Client: {e}")
-        logging.error("Please check ORACLE_INSTANT_CLIENT_PATH and ORACLE_WALLET_PATH in your .env file.")
+        logging.error("Please check that ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME in your .env file point to the correct directory names within your project.")
         sys.exit(1)
 
 def get_oracle_data():
     """Fetches euromillions data from the Oracle database."""
+    initialize_oracle_client()
     logging.info("Connecting to Oracle DB...")
     try:
+        wallet_path = os.path.join(PROJECT_ROOT, os.getenv("ORACLE_WALLET_DIR_NAME"))
         with oracledb.connect(
             user=os.getenv("ORACLE_DB_USER"),
             password=os.getenv("ORACLE_DB_PASSWORD"),
             dsn=os.getenv("ORACLE_DB_DSN"),
             wallet_password=os.getenv("ORACLE_WALLET_PASSWORD"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH"),
-            wallet_location=os.getenv("ORACLE_WALLET_PATH")
+            config_dir=wallet_path,
+            wallet_location=wallet_path
         ) as connection:
             logging.info("Successfully connected. Fetching draw history...")
-            df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY ORDER BY DRAW_DATE DESC", connection)
+            # Use a warnings context to specifically ignore the UserWarning from pandas
+            # about using a non-SQLAlchemy connection object.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY ORDER BY DRAW_DATE DESC", connection)
             logging.info(f"Fetched {len(df)} rows from Oracle.")
             return df
     except oracledb.Error as e:
@@ -136,28 +156,33 @@ def main():
     print("future results. Please play responsibly.")
     print("="*60 + "\n")
     
-    # --- Strategy Selection ---
+    parser = argparse.ArgumentParser(description="Generate EuroMillions number predictions based on a chosen strategy.")
     strategies = {
         '1': 'most_frequent',
         '2': 'least_frequent',
         '3': 'most_overdue',
         '4': 'random'
     }
+    parser.add_argument('--strategy', type=str, choices=strategies.values(), help="The prediction strategy to use.")
+    args = parser.parse_args()
+
+    if args.strategy:
+        strategy = args.strategy
+    else:
+        # Interactive mode if no strategy is passed via command line
+        print("Please choose a prediction strategy:")
+        print("  1. Most Frequent:  Picks the numbers that have appeared most often.")
+        print("  2. Least Frequent: Picks the numbers that have appeared least often.")
+        print("  3. Most Overdue:   Picks the numbers that haven't been drawn for the longest time.")
+        print("  4. Random:         Picks a random set of numbers.")
+        
+        choice = ''
+        while choice not in strategies:
+            choice = input("\nEnter the number of your chosen strategy (1-4): ").strip()
+            if choice not in strategies:
+                print("Invalid choice. Please enter a number between 1 and 4.")
+        strategy = strategies[choice]
     
-    print("Please choose a prediction strategy:")
-    print("  1. Most Frequent:  Picks the numbers that have appeared most often.")
-    print("  2. Least Frequent: Picks the numbers that have appeared least often.")
-    print("  3. Most Overdue:   Picks the numbers that haven't been drawn for the longest time.")
-    print("  4. Random:         Picks a random set of numbers.")
-    
-    choice = ''
-    while choice not in strategies:
-        choice = input("\nEnter the number of your chosen strategy (1-4): ").strip()
-        if choice not in strategies:
-            print("Invalid choice. Please enter a number between 1 and 4.")
-    strategy = strategies[choice]
-    
-    initialize_oracle_client()
     df_raw = get_oracle_data()
 
     if df_raw is None or df_raw.empty:

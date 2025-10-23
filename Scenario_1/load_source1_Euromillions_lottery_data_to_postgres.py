@@ -2,18 +2,34 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import to_date, col
 from dotenv import load_dotenv
 import os
+import logging
 
 def main():
     """
     Main function to initialize Spark, read lottery data from CSV files,
     and write it to a PostgreSQL database.
     """
-    # Initialize Spark session with the PostgreSQL JDBC driver
-    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+    
+    # --- Configuration ---
+    # Define the project root directory to build absolute paths
+    # Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+    PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    logging.info(f"Project root directory set to: {PROJECT_ROOT}")
 
+    # Load environment variables from .env file
+    dotenv_path = os.path.join(PROJECT_ROOT, '.env')
+    load_dotenv(dotenv_path=dotenv_path)
+
+    # Get the relative path from the environment variable and remove any leading slashes
+    relative_jar_path = os.getenv("PG_JAR_PATH", "").lstrip("/")
+    # Construct the absolute path by joining with the project root
+    pg_jar_path = os.path.join(PROJECT_ROOT, relative_jar_path)
+
+
+    # Initialize Spark session with the PostgreSQL JDBC driver
     spark = SparkSession.builder \
         .appName("PostgresLotteryDataLoad") \
-        .config("spark.jars", "/Applications/Drivers/postgresql-42.7.8.jar") \
+        .config("spark.jars", pg_jar_path) \
         .getOrCreate()
 
     # --- Connection Properties ---
@@ -26,9 +42,14 @@ def main():
         "sslmode": "require"
     }
 
+    # --- File Paths ---
+    INPUT_DIR = os.path.join(PROJECT_ROOT, "Scenario_1/Data")
+
     # --- Process EuroMillions Data ---
-    euromillions_csv_path_1 = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_1/Data/euromillions-draw-history_20210416-20211012.csv"
-    euromillions_csv_path_2 = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_1/Data/euromillions-draw-history_20221223-20230616.csv"
+    #euromillions_csv_path_1 = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_1/Data/euromillions-draw-history_20210416-20211012.csv"
+    #euromillions_csv_path_2 = "/Users/stephenpir/Desktop/Code/My Portfolio/Scenario_1/Data/euromillions-draw-history_20221223-20230616.csv"
+    euromillions_csv_path_1 = os.path.join(INPUT_DIR, "euromillions-draw-history_20210416-20211012.csv")
+    euromillions_csv_path_2 = os.path.join(INPUT_DIR, "euromillions-draw-history_20221223-20230616.csv")
     euromillions_table = "public.euromillions_draw_history_pg"
 
     # Read the CSVs, infer schema, union the data into one df and correct the date format

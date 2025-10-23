@@ -4,7 +4,10 @@ import os
 import sys
 from dotenv import load_dotenv
 import logging
+import argparse
 import numpy as np
+import warnings
+import tempfile
 
 # --- PyTorch Imports ---
 import torch
@@ -12,8 +15,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
+# Define the project root directory to build absolute paths
+# Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Load environment variables from the .env file in the project root
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, '.env'))
 
 def setup_logging():
     """Configures basic logging."""
@@ -22,35 +29,49 @@ def setup_logging():
         format='%(asctime)s - %(levelname)s - %(message)s',
         stream=sys.stdout
     )
-    import warnings
     warnings.filterwarnings("ignore", category=UserWarning, module="pandas")
 
 def initialize_oracle_client():
     """Initializes the Oracle Client. Exits on failure."""
     try:
-        oracledb.init_oracle_client(
-            lib_dir=os.getenv("ORACLE_INSTANT_CLIENT_PATH"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH")
-        )
+        # Construct absolute paths relative to the project root
+        client_dir_name = os.getenv("ORACLE_INSTANT_CLIENT_DIR_NAME")
+        wallet_dir_name = os.getenv("ORACLE_WALLET_DIR_NAME")
+
+        if not all([client_dir_name, wallet_dir_name]):
+            logging.error("Oracle directory names are not set in the environment.")
+            logging.error("Please ensure ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME are in your .env file or environment variables.")
+            sys.exit(1)
+
+        client_path = os.path.join(PROJECT_ROOT, client_dir_name)
+        wallet_path = os.path.join(PROJECT_ROOT, wallet_dir_name)
+
+        oracledb.init_oracle_client(lib_dir=client_path, config_dir=wallet_path)
+        logging.info("Oracle Client initialized successfully.")
     except oracledb.Error as e:
         logging.error(f"Error initializing Oracle Client: {e}")
-        logging.error("Please check ORACLE_INSTANT_CLIENT_PATH and ORACLE_WALLET_PATH in your .env file.")
+        logging.error("Please check that ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME in your .env file point to the correct directory names within your project.")
         sys.exit(1)
 
 def get_oracle_data():
     """Fetches euromillions data from the Oracle database."""
     logging.info("Connecting to Oracle DB...")
     try:
+        wallet_path = os.path.join(PROJECT_ROOT, os.getenv("ORACLE_WALLET_DIR_NAME"))
         with oracledb.connect(
             user=os.getenv("ORACLE_DB_USER"),
             password=os.getenv("ORACLE_DB_PASSWORD"),
             dsn=os.getenv("ORACLE_DB_DSN"),
             wallet_password=os.getenv("ORACLE_WALLET_PASSWORD"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH"),
-            wallet_location=os.getenv("ORACLE_WALLET_PATH")
+            config_dir=wallet_path,
+            wallet_location=wallet_path
         ) as connection:
             logging.info("Successfully connected. Fetching draw history...")
-            df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY ORDER BY DRAW_DATE ASC", connection)
+            # Use a warnings context to specifically ignore the UserWarning from pandas
+            # about using a non-SQLAlchemy connection object.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY ORDER BY DRAW_DATE ASC", connection)
             logging.info(f"Fetched {len(df)} rows from Oracle.")
             return df
     except oracledb.Error as e:
@@ -229,24 +250,32 @@ def main_pytorch():
 
     initialize_oracle_client()
     df_raw = get_oracle_data()
-
-    if df_raw is None or df_raw.empty:
+    if df_raw is None:
         logging.error("Could not retrieve data from Oracle. Exiting.")
         sys.exit(1)
 
     df = standardize_dataframe(df_raw)
 
-    # --- Data Filtering Choice ---
-    print("Please choose the dataset to use for prediction:")
-    print("  1. Entire History (All Draws)")
-    print("  2. Tuesday Draws Only")
-    print("  3. Friday Draws Only")
+    # --- Argument Parsing for Data Filtering ---
+    parser = argparse.ArgumentParser(description="Generate EuroMillions predictions using a PyTorch Neural Network.")
+    parser.add_argument('--filter', type=str, choices=['all', 'tuesday', 'friday'], help="Filter dataset by draw day ('all', 'tuesday', 'friday').")
+    args = parser.parse_args()
 
-    filter_choice = ''
-    while filter_choice not in ['1', '2', '3']:
-        filter_choice = input("\nEnter your choice (1-3): ").strip()
-        if filter_choice not in ['1', '2', '3']:
-            print("Invalid choice. Please enter a number between 1 and 3.")
+    if args.filter:
+        filter_choice_map = {'all': '1', 'tuesday': '2', 'friday': '3'}
+        filter_choice = filter_choice_map[args.filter]
+    else:
+        # Interactive mode if no filter is passed via command line
+        print("Please choose the dataset to use for prediction:")
+        print("  1. Entire History (All Draws)")
+        print("  2. Tuesday Draws Only")
+        print("  3. Friday Draws Only")
+
+        filter_choice = ''
+        while filter_choice not in ['1', '2', '3']:
+            filter_choice = input("\nEnter your choice (1-3): ").strip()
+            if filter_choice not in ['1', '2', '3']:
+                print("Invalid choice. Please enter a number between 1 and 3.")
 
     df_filtered = df.copy() # Start with the full dataframe
     filter_desc = "Entire History"

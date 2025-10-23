@@ -5,10 +5,16 @@ import sys
 from dotenv import load_dotenv
 import logging
 from sqlalchemy import create_engine
+import warnings
+import argparse
 from sqlalchemy import text
 
+# Define the project root directory to build absolute paths
+# Use environment variable if set (for Docker/Airflow), otherwise calculate from file location
+PROJECT_ROOT = os.getenv('PROJECT_ROOT') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Load environment variables from the .env file in the project root
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, '.env'))
 
 class TerminalFilter(logging.Filter):
     """A custom filter to prevent 'file_only' records from reaching the terminal."""
@@ -36,36 +42,49 @@ def setup_logging():
     
     # Suppress the noisy UserWarning from pandas about non-SQLAlchemy DBAPI2 objects
     # This is expected when using the raw oracledb connection object
-    import warnings
     warnings.filterwarnings("ignore", category=UserWarning, module="pandas")
 
 def initialize_oracle_client():
     """Initializes the Oracle Client. Exits on failure."""
     try:
-        oracledb.init_oracle_client(
-            lib_dir=os.getenv("ORACLE_INSTANT_CLIENT_PATH"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH")
-        )
+        client_dir_name = os.getenv("ORACLE_INSTANT_CLIENT_DIR_NAME")
+        wallet_dir_name = os.getenv("ORACLE_WALLET_DIR_NAME")
+
+        if not all([client_dir_name, wallet_dir_name]):
+            logging.error("Oracle directory names are not set in the environment.")
+            logging.error("Please ensure ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME are in your .env file or environment variables.")
+            sys.exit(1)
+
+        client_path = os.path.join(PROJECT_ROOT, client_dir_name)
+        wallet_path = os.path.join(PROJECT_ROOT, wallet_dir_name)
+
+        oracledb.init_oracle_client(lib_dir=client_path, config_dir=wallet_path)
+        logging.info("Oracle Client initialized successfully.")
     except oracledb.Error as e:
         logging.error(f"Error initializing Oracle Client: {e}")
-        logging.error("Please check ORACLE_INSTANT_CLIENT_PATH and ORACLE_WALLET_PATH in your .env file.")
+        logging.error("Please check that ORACLE_INSTANT_CLIENT_DIR_NAME and ORACLE_WALLET_DIR_NAME in your .env file point to the correct directory names within your project.")
         sys.exit(1)
 
 def get_oracle_data():
     """Fetches euromillions data from the Oracle database."""
     logging.info("Connecting to Oracle DB...")
     try:
+        wallet_path = os.path.join(PROJECT_ROOT, os.getenv("ORACLE_WALLET_DIR_NAME"))
         with oracledb.connect(
             user=os.getenv("ORACLE_DB_USER"),
             password=os.getenv("ORACLE_DB_PASSWORD"),
             dsn=os.getenv("ORACLE_DB_DSN"),
             wallet_password=os.getenv("ORACLE_WALLET_PASSWORD"),
-            config_dir=os.getenv("ORACLE_WALLET_PATH"),
-            wallet_location=os.getenv("ORACLE_WALLET_PATH")
+            config_dir=wallet_path,
+            wallet_location=wallet_path
         ) as connection:
             logging.info("Successfully connected to Oracle. Fetching data...")
             # Fetch all relevant columns and ensure data types are consistent on load
-            df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY", connection)
+            # Use a warnings context to specifically ignore the UserWarning from pandas
+            # about using a non-SQLAlchemy connection object.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                df = pd.read_sql("SELECT * FROM EUROMILLIONS_DRAW_HISTORY", connection)
             logging.info(f"Fetched {len(df)} rows from Oracle.")
             return df
     except oracledb.Error as e:
@@ -136,12 +155,23 @@ def main():
     setup_logging()
     logging.info("--- Starting Data Validation ---")
 
-    # Prompt user for detailed terminal output
-    show_details_in_terminal = input("Show detailed line-by-line results in the terminal? (y/n): ").lower().strip() == 'y'
+    # --- Argument Parsing for Non-Interactive Mode (Airflow) ---
+    parser = argparse.ArgumentParser(description="Run data validation between Oracle and PostgreSQL.")
+    parser.add_argument('--show-details', action='store_true', help="Show detailed line-by-line results in the terminal.")
+    args, unknown = parser.parse_known_args()
+
+    show_details_in_terminal = False
+    if args.show_details:
+        show_details_in_terminal = True
+    # Only prompt for input if running in an interactive terminal and the flag wasn't passed.
+    # This prevents the EOFError in non-interactive environments like Airflow.
+    elif sys.stdout.isatty():
+        show_details_in_terminal = input("Show detailed line-by-line results in the terminal? (y/n): ").lower().strip() == 'y'
+
     if show_details_in_terminal:
         logging.info("Detailed results will be shown in the terminal and saved to validation_report.log.")
     else:
-        logging.info("Progress will be shown in the terminal. Detailed results will be saved to validation_report.log.")
+        logging.info("Progress will NOT be shown in the terminal. Detailed results will be saved to validation_report.log.")
     
     # Step 2: Initialize Oracle Client
     initialize_oracle_client()
@@ -193,6 +223,9 @@ def main():
 
     # Find rows in both and check for mismatches
     both_df = comparison_df[comparison_df['_merge'] == 'both'].copy()
+    # Initialize mismatches as an empty DataFrame to prevent UnboundLocalError
+    mismatches = pd.DataFrame()
+
     if not both_df.empty:
         logging.info(f"Found {len(both_df)} common draws. Now checking for data mismatches...")
         both_df['draw_number_match'] = (both_df['draw_number_pg'] == both_df['draw_number_ora'])
