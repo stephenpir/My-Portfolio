@@ -261,21 +261,36 @@ def main_pytorch():
     parser.add_argument('--filter', type=str, choices=['all', 'tuesday', 'friday'], help="Filter dataset by draw day ('all', 'tuesday', 'friday').")
     args = parser.parse_args()
 
+    filter_choice_map = {'all': '1', 'tuesday': '2', 'friday': '3'}
+    filter_choice = None # Initialize to None
+
+    # Determine if we are in an interactive session (e.g., local terminal) vs. non-interactive (e.g., Airflow)
+    # The script is non-interactive if arguments are passed or if stdin is not a TTY.
+    # We check if --filter was NOT provided AND if it's an interactive terminal.
+    is_interactive_prompt_needed = sys.stdin.isatty() and args.filter is None
+
     if args.filter:
-        filter_choice_map = {'all': '1', 'tuesday': '2', 'friday': '3'}
         filter_choice = filter_choice_map[args.filter]
-    else:
-        # Interactive mode if no filter is passed via command line
+    elif is_interactive_prompt_needed:
+        # --- Interactive Mode ---
         print("Please choose the dataset to use for prediction:")
         print("  1. Entire History (All Draws)")
         print("  2. Tuesday Draws Only")
         print("  3. Friday Draws Only")
 
-        filter_choice = ''
         while filter_choice not in ['1', '2', '3']:
             filter_choice = input("\nEnter your choice (1-3): ").strip()
             if filter_choice not in ['1', '2', '3']:
                 print("Invalid choice. Please enter a number between 1 and 3.")
+    else:
+        # Non-interactive mode and no --filter argument provided. Default to 'all'.
+        logging.warning("No --filter argument provided and not running in an interactive terminal. Defaulting to 'all' draws.")
+        filter_choice = filter_choice_map['all']
+
+    # Ensure filter_choice is set before proceeding
+    if filter_choice is None:
+        logging.error("Filter choice could not be determined. Exiting.")
+        sys.exit(1)
 
     df_filtered = df.copy() # Start with the full dataframe
     filter_desc = "Entire History"

@@ -286,13 +286,19 @@ def main():
     # --- Argument Parsing for Non-Interactive Mode (Airflow) ---
     parser = argparse.ArgumentParser(description="Run EuroMillions data analysis.")
     parser.add_argument('--show-details', action='store_true', help="Show detailed summary data in the terminal.")
-    args, unknown = parser.parse_known_args() # Use parse_known_args to avoid errors with other potential args
+    args, unknown = parser.parse_known_args()  # Use parse_known_args to avoid errors with other potential args
 
+    # Determine if we are in an interactive session (e.g., local terminal) vs. non-interactive (e.g., Airflow)
+    # The script is non-interactive if arguments are passed or if stdin is not a TTY.
+    is_interactive = sys.stdin.isatty() and not any(arg.startswith('--') for arg in sys.argv[1:])
+
+    show_details_in_terminal = False
     if args.show_details:
         show_details_in_terminal = True
-    else:
+    elif is_interactive:
         # --- Interactive Mode ---
-        show_details_in_terminal = input("Show detailed summary data in the terminal? (y/n): ").lower().strip() == 'y'
+        response = input("Show detailed summary data in the terminal? (y/n): ").lower().strip()
+        show_details_in_terminal = response == 'y'
 
     if show_details_in_terminal:
         logging.info("Detailed results will be shown in the terminal and saved to analysis_report.log.")

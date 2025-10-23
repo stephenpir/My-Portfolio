@@ -17,7 +17,8 @@ PROJECT_ROOT = "/opt/airflow/my_portfolio"
     tags=["euromillions", "analysis", "prediction", "ml"],
     params={
         "stat_strategy": Param("most_frequent", type="string", enum=["most_frequent", "least_frequent", "most_overdue", "random"]),
-        "ml_filter": Param("all", type="string", enum=["all", "tuesday", "friday"]),
+        "ml_filter": Param("all", type="string", enum=["all", "tuesday", "friday"], title="ML Model Filter"),
+        "pytorch_filter": Param("all", type="string", enum=["all", "tuesday", "friday"], title="PyTorch Model Filter"),
         "show_analysis_details": Param(False, type="boolean"),
     },
     doc_md="""
@@ -52,7 +53,7 @@ def euromillions_analysis_dag():
 
     run_pytorch_prediction = BashOperator(
         task_id="run_pytorch_prediction",
-        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_pytorch_euromillions.py' --filter '{{{{ params.ml_filter }}}}'",
+        bash_command=f"python '{PROJECT_ROOT}/Scenario_3/predict_pytorch_euromillions.py' --filter '{{{{ params.pytorch_filter }}}}'",
     )
 
     # Define task dependencies: Analysis runs first, then all predictions can run in parallel.
