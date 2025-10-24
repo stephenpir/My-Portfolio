@@ -39,4 +39,4 @@ plots/
 
 # --- SQL Scripts ---
 # Ignore database setup/alter scripts that may be environment-specific.
-Scenario_1/*.sql
+Scenario_1/alter*.psql
