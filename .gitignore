@@ -36,3 +36,7 @@ plots/
 **/euromillions_draw_history_scraped.csv
 **/euromillions_draw_history_from_oracle.csv
 **/euromillions_draw_history_from_oracle.json
+
+# --- SQL Scripts ---
+# Ignore database setup/alter scripts that may be environment-specific.
+Scenario_1/*.sql
