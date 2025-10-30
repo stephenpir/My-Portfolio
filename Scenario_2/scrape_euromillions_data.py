@@ -1,5 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 import os
 
@@ -32,6 +34,17 @@ def scrape_euromillions_history():
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
     })
+
+    # --- Add Retry Logic ---
+    # Configure a retry strategy for handling transient network errors or server-side issues.
+    retry_strategy = Retry(
+        total=3,  # Total number of retries
+        backoff_factor=1,  # A delay factor between retries: {backoff factor} * (2 ** ({number of total retries} - 1))
+        status_forcelist=[429, 500, 502, 503, 504],  # HTTP status codes to retry on
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
 
     for year in range(start_year, end_year + 1):
         url = f"{base_url}{year}/"
