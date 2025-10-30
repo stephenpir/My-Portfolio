@@ -74,26 +74,42 @@ def scrape_euromillions_history():
                     f.write(soup.prettify())
                 continue
 
-            # Find all rows in the table body
-            rows = table.find_all("tr", recursive=False)
+            # --- Flexible Parsing Logic ---
+            # 1. Find header row and map header names to column indices
+            header_row = table.select_one("thead tr")
+            if not header_row:
+                print(f"Could not find table header for year {year}. Skipping.")
+                continue
+
+            headers = [th.text.strip().lower() for th in header_row.find_all("th")]
+            try:
+                header_map = {
+                    'draw date': headers.index('draw date'),
+                    'jackpot': headers.index('jackpot'),
+                    'winners': headers.index('winners'),
+                }
+            except ValueError as e:
+                print(f"[ERROR] Could not find expected column header in {year}: {e}. Skipping year.")
+                continue
+
+            # 2. Find all data rows in the table body and process them using the header map
+            rows = table.select("tbody tr")
 
             print(f"Found {len(rows)} draws for {year}.")
 
-            # Extract data from each row
             for i, row in enumerate(rows):
                 try:
                     cells = row.find_all("td")
-                    # Ensure the row has data cells and is not a header row
-                    if len(cells) > 1 and "hidden-xs" in cells[0].get('class', []):
-                        draw_date = cells[0].text.strip()
-                        jackpot = cells[4].text.strip()
-                        winners = cells[5].text.strip()
+                    if len(cells) > max(header_map.values()):
+                        draw_date = cells[header_map['draw date']].text.strip()
+                        jackpot = cells[header_map['jackpot']].text.strip()
+                        winners = cells[header_map['winners']].text.strip()
 
                         balls = [span.text.strip() for span in row.select("span.ball-euromillions")]
                         lucky_stars = [span.text.strip() for span in row.select("span.ball-euromillions-lucky-star")]
 
                         if not balls or not lucky_stars:
-                            print(f"\n[WARNING] Failed to extract numbers for row {i+1} in {year}. HTML:")
+                            print(f"\n[WARNING] Failed to extract numbers for row {i+1} in {year} (Date: {draw_date}). HTML:")
                             print(row.prettify())
                         else:
                             all_draws.append([draw_date] + balls + lucky_stars + [jackpot, winners])
@@ -120,9 +136,13 @@ def scrape_euromillions_history():
 
 if __name__ == "__main__":
     scraped_df = scrape_euromillions_history()
-    if scraped_df is not None:
-        # Save the DataFrame to a CSV file
-        output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "euromillions_draw_history_scraped.csv")
-        scraped_df.to_csv(output_path, index=False)
-        print(f"\nSuccessfully scraped {len(scraped_df)} draws.")
-        print(f"Data saved to {output_path}")
+    if scraped_df is not None and not scraped_df.empty:
+        # Define the output path within the script's directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        output_path = os.path.join(script_dir, "euromillions_draw_history_scraped.csv")
+
+        # Save the DataFrame to a CSV file, ensuring the directory exists
+        scraped_df.to_csv(output_path, index=False, date_format='%Y-%m-%d')
+        print(f"\nSuccessfully scraped {len(scraped_df)} draws and saved to {output_path}")
+    else:
+        print("\nScraping did not produce any data. No file was saved.")
